@@ -1,0 +1,7 @@
+{
+  "name": "bybit-xau-monitor",
+  "private": true,
+  "dependencies": {
+    "playwright-core": "^1.49.0"
+  }
+}
