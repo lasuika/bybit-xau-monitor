@@ -81,6 +81,27 @@ async function getGold() {
   };
 }
 
+// The public open-position API returns no open timestamp, so position age is
+// derived from when this monitor first observed each position. Ages are exact
+// only when the previous run was recent enough to have witnessed the opening.
+function trackPositionAges(state, name, openList, prevRunMs) {
+  state.seenPositions = state.seenPositions || {};
+  const seen = state.seenPositions;
+  const continuous = prevRunMs && nowMs() - prevRunMs < 20 * 60 * 1000;
+  const live = new Set();
+
+  for (const p of openList) {
+    const key = [name, p.symbol, p.side, p.entryPrice, p.positionValueE8].join('|');
+    live.add(key);
+    if (!seen[key]) seen[key] = { firstSeen: nowMs(), exact: !!continuous };
+    p._ageMin = Math.round((nowMs() - seen[key].firstSeen) / 60000);
+    p._ageExact = seen[key].exact;
+  }
+  for (const key of Object.keys(seen)) {
+    if (key.startsWith(name + '|') && !live.has(key)) delete seen[key];
+  }
+}
+
 async function checkProvider(state, name, data, R, gold) {
   const openList = data.open.result.openPositionList || [];
   const hist = data.hist.result.historyPositionList || [];
@@ -102,16 +123,15 @@ async function checkProvider(state, name, data, R, gold) {
     const byDir = {};
     for (const p of openList) (byDir[p.side] = byDir[p.side] || []).push(p);
     for (const [side, ps] of Object.entries(byDir)) {
-      const withTime = ps.filter((p) => p.openTime);
-      const oldestMs = withTime.length
-        ? Math.min(...withTime.map((p) => Date.parse(p.openTime.replace(' ', 'T') + 'Z')))
-        : null;
-      const ageMin = oldestMs ? Math.round((nowMs() - oldestMs) / 60000) : null;
+      const ageMin = Math.max(...ps.map((p) => p._ageMin));
+      const ageExact = ps.some((p) => p._ageMin === ageMin && p._ageExact);
+      const agePrefix = ageExact ? '' : '≥';
       const avgEntry = ps.reduce((a, p) => a + +p.entryPrice, 0) / ps.length;
       const float = ps.reduce((a, p) => a + (+p.profitE8 || 0) / 1e8, 0);
-      if (ps.length >= R.stackMinPositions && (ageMin === null || ageMin >= R.stackMinOldestAgeMin)) {
+      // Only a losing stack is the blow-up pattern; a winning stack is just a good day.
+      if (ps.length >= R.stackMinPositions && ageMin >= R.stackMinOldestAgeMin && float < 0) {
         await alert(state, name + ':stack-' + side, '🔴 紅燈:他在堆疊扛單',
-          `${name}:${ps.length} 筆同向 ${side} 堆疊,最老倉齡 ${ageMin ?? '?'} 分鐘,均價 ${avgEntry.toFixed(1)},浮動 ${float >= 0 ? '+' : ''}${float.toFixed(0)} USD。爆倉前的型態,考慮撤退。`);
+          `${name}:${ps.length} 筆同向 ${side} 堆疊,最老倉齡 ${agePrefix}${ageMin} 分鐘,均價 ${avgEntry.toFixed(1)},浮虧 ${float.toFixed(0)} USD。爆倉前的型態,考慮撤退。`);
       }
     }
   }
@@ -173,11 +193,15 @@ async function checkProvider(state, name, data, R, gold) {
   let gold = null;
   try { gold = await getGold(); } catch (e) { log({ goldError: e.message }); }
 
+  const prevRunMs = state.lastRunMs || 0;
+  state.lastRunMs = nowMs();
+
   const summary = {};
   for (const p of CFG.providers) {
     const data = bybit.providers[p.name];
     if (!data) { log({ missingProvider: p.name }); continue; }
     const R = { ...CFG.rules, ...(p.rules || {}) };
+    trackPositionAges(state, p.name, data.open.result.openPositionList || [], prevRunMs);
     summary[p.name] = await checkProvider(state, p.name, data, R, gold);
   }
 
