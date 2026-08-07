@@ -20,10 +20,11 @@
     "goldTrendPct": 1.5,
     "silentMinutes": 120,
     "divergenceDropPct": 2.0,
-    "floatLossPctOfEquity": 10,
     "cooldownHours": 2,
     "failAlertAfter": 3,
-    "failCooldownHours": 6
+    "failCooldownHours": 6,
+    "floatWarnPct": 10,
+    "floatCritPct": 20
   },
   "gcSpotOffset": 75
 }

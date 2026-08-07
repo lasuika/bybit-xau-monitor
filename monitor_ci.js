@@ -89,9 +89,12 @@ async function checkProvider(state, name, data, R, gold) {
   if (openList.length && assets > 0) {
     const totalFloat = openList.reduce((a, p) => a + (+p.profitE8 || 0) / 1e8, 0);
     const floatPct = (totalFloat / assets) * 100;
-    if (floatPct <= -R.floatLossPctOfEquity) {
-      await alert(state, name + ':float', '🔴 紅燈:浮虧失控',
-        `${name}:未實現虧損 ${totalFloat.toFixed(0)} USD = 他權益的 ${(-floatPct).toFixed(0)}%(${openList.length} 筆持倉)。無停損策略下這只會更深,考慮先跑。`);
+    if (floatPct <= -R.floatCritPct) {
+      await alert(state, name + ':float-crit', '🔴 紅燈:浮虧達 20%,該下車了',
+        `${name}:未實現虧損 ${totalFloat.toFixed(0)} USD = 他權益的 ${(-floatPct).toFixed(0)}%(${openList.length} 筆持倉)。無停損策略下這只會更深 — 這是下車點。`, 1);
+    } else if (floatPct <= -R.floatWarnPct) {
+      await alert(state, name + ':float-warn', '🟡 黃燈:浮虧達 10%,該減碼了',
+        `${name}:未實現虧損 ${totalFloat.toFixed(0)} USD = 他權益的 ${(-floatPct).toFixed(0)}%(${openList.length} 筆持倉)。你說過這時要減碼 — 現在部位還只是小虧,動手比等便宜。`, 1);
     }
   }
 
