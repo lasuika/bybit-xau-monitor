@@ -136,7 +136,9 @@ async function checkProvider(state, name, data, R, gold) {
     }
   }
 
-  if (gold && !gold.stale && Math.abs(gold.movePct) >= R.goldTrendPct && hist.length) {
+  // Requires open positions: silence with nothing open means he stopped trading
+  // (or blew up), not that he is sitting on losses.
+  if (openList.length && gold && !gold.stale && Math.abs(gold.movePct) >= R.goldTrendPct && hist.length) {
     const silentMin = Math.round((nowMs() - Date.parse(hist[0].closeTime.replace(' ', 'T') + 'Z')) / 60000);
     if (silentMin >= R.silentMinutes) {
       await alert(state, name + ':silent-trend', '🔴 紅燈:單邊行情+他消失了',
@@ -151,9 +153,14 @@ async function checkProvider(state, name, data, R, gold) {
     if (cum && cum.length >= 2 && daily && daily.length) {
       const c1 = +cum[cum.length - 1].value, c0 = +cum[cum.length - 2].value;
       const d1 = +daily[daily.length - 1].value;
-      const dayKey = new Date(+daily[daily.length - 1].statisticDateE3).toISOString().slice(0, 10);
+      const dayMs = +daily[daily.length - 1].statisticDateE3;
+      const dayKey = new Date(dayMs).toISOString().slice(0, 10);
+      // A dormant/blown-up account keeps reporting its last bad day forever.
+      const staleDay = nowMs() - dayMs > 48 * 3600 * 1000;
       const dropPct = (c1 - c0) / 100;
-      if (d1 <= -1000) {
+      if (staleDay) {
+        log({ skipStaleDay: name, dayKey, dailyRoePct: d1 / 100 });
+      } else if (d1 <= -1000) {
         await alert(state, name + ':blowup-' + dayKey, '🔴 已爆:單日虧損超過 10%',
           `${name}:今天已實現 ${(d1 / 100).toFixed(1)}%。這是離場點,不是攤平點。`, 48);
       } else if (d1 >= 0 && dropPct <= -R.divergenceDropPct) {
