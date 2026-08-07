@@ -1,27 +1,16 @@
-// Cloud (GitHub Actions) variant of the Bybit red-light monitor.
+// Cloud (GitHub Actions) variant of the Bybit red-light monitor (multi-provider).
 // Cadence is controlled by the workflow cron; state persists via actions/cache.
-// Alerts go to ntfy.sh only (topic from NTFY_TOPIC env).
+// Alerts go to ntfy.sh only (topic from NTFY_TOPIC env). Providers/rules in config.json.
 const { execFile } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const https = require('https');
 
 const DIR = __dirname;
+const CFG = JSON.parse(fs.readFileSync(path.join(DIR, 'config.json'), 'utf8'));
 const STATE_FILE = path.join(DIR, 'state.json');
 const NTFY_TOPIC = process.env.NTFY_TOPIC;
 const NTFY_SERVER = 'https://ntfy.sh';
-const PROVIDER_NAME = 'XAUUSDx SECURE TRADER';
-const GC_SPOT_OFFSET = 75;
-const R = {
-  stackMinPositions: 3,
-  stackMinOldestAgeMin: 30,
-  goldTrendPct: 1.5,
-  silentMinutes: 120,
-  divergenceDropPct: 2.0,
-  cooldownHours: 2,
-  failAlertAfter: 3,
-  failCooldownHours: 6,
-};
 
 const nowMs = () => Date.now();
 const hours = (h) => h * 3600 * 1000;
@@ -44,7 +33,7 @@ function httpsGetJson(url) {
 
 function fetchBybit() {
   return new Promise((resolve, reject) => {
-    execFile(process.execPath, [path.join(DIR, 'fetch_bybit.js')], { timeout: 120000, maxBuffer: 10 * 1024 * 1024 },
+    execFile(process.execPath, [path.join(DIR, 'fetch_bybit.js')], { timeout: 150000, maxBuffer: 20 * 1024 * 1024 },
       (err, stdout, stderr) => {
         if (err) return reject(new Error('fetch_bybit failed: ' + (stderr || err.message).slice(0, 300)));
         try { resolve(JSON.parse(stdout)); } catch { reject(new Error('bad JSON from fetch_bybit')); }
@@ -70,7 +59,7 @@ function notifyPhone(title, msg, priority) {
 }
 
 async function alert(state, key, title, msg, cooldownH) {
-  const cd = hours(cooldownH ?? R.cooldownHours);
+  const cd = hours(cooldownH ?? CFG.rules.cooldownHours);
   const last = state.alerts?.[key] || 0;
   if (nowMs() - last < cd) { log({ suppressed: key }); return; }
   state.alerts = state.alerts || {};
@@ -92,6 +81,68 @@ async function getGold() {
   };
 }
 
+async function checkProvider(state, name, data, R, gold) {
+  const openList = data.open.result.openPositionList || [];
+  const hist = data.hist.result.historyPositionList || [];
+  const assets = +(data.info.result.totalAssetsE8 || 0) / 1e8;
+
+  if (openList.length && assets > 0) {
+    const totalFloat = openList.reduce((a, p) => a + (+p.profitE8 || 0) / 1e8, 0);
+    const floatPct = (totalFloat / assets) * 100;
+    if (floatPct <= -R.floatLossPctOfEquity) {
+      await alert(state, name + ':float', '🔴 紅燈:浮虧失控',
+        `${name}:未實現虧損 ${totalFloat.toFixed(0)} USD = 他權益的 ${(-floatPct).toFixed(0)}%(${openList.length} 筆持倉)。無停損策略下這只會更深,考慮先跑。`);
+    }
+  }
+
+  if (openList.length) {
+    const byDir = {};
+    for (const p of openList) (byDir[p.side] = byDir[p.side] || []).push(p);
+    for (const [side, ps] of Object.entries(byDir)) {
+      const withTime = ps.filter((p) => p.openTime);
+      const oldestMs = withTime.length
+        ? Math.min(...withTime.map((p) => Date.parse(p.openTime.replace(' ', 'T') + 'Z')))
+        : null;
+      const ageMin = oldestMs ? Math.round((nowMs() - oldestMs) / 60000) : null;
+      const avgEntry = ps.reduce((a, p) => a + +p.entryPrice, 0) / ps.length;
+      const float = ps.reduce((a, p) => a + (+p.profitE8 || 0) / 1e8, 0);
+      if (ps.length >= R.stackMinPositions && (ageMin === null || ageMin >= R.stackMinOldestAgeMin)) {
+        await alert(state, name + ':stack-' + side, '🔴 紅燈:他在堆疊扛單',
+          `${name}:${ps.length} 筆同向 ${side} 堆疊,最老倉齡 ${ageMin ?? '?'} 分鐘,均價 ${avgEntry.toFixed(1)},浮動 ${float >= 0 ? '+' : ''}${float.toFixed(0)} USD。爆倉前的型態,考慮撤退。`);
+      }
+    }
+  }
+
+  if (gold && !gold.stale && Math.abs(gold.movePct) >= R.goldTrendPct && hist.length) {
+    const silentMin = Math.round((nowMs() - Date.parse(hist[0].closeTime.replace(' ', 'T') + 'Z')) / 60000);
+    if (silentMin >= R.silentMinutes) {
+      await alert(state, name + ':silent-trend', '🔴 紅燈:單邊行情+他消失了',
+        `${name}:黃金今天 ${gold.movePct >= 0 ? '+' : ''}${gold.movePct.toFixed(1)}%(GC=F ${gold.last.toFixed(0)}),而他已 ${Math.floor(silentMin / 60)} 小時 ${silentMin % 60} 分沒有平倉紀錄 = 大概率在扛浮虧。`);
+    }
+  }
+
+  try {
+    const lines = {};
+    for (const l of data.trend.result.metricList) lines[l.line] = l.metricLineValue;
+    const cum = lines.cumRoe, daily = lines.dailyRoe;
+    if (cum && cum.length >= 2 && daily && daily.length) {
+      const c1 = +cum[cum.length - 1].value, c0 = +cum[cum.length - 2].value;
+      const d1 = +daily[daily.length - 1].value;
+      const dayKey = new Date(+daily[daily.length - 1].statisticDateE3).toISOString().slice(0, 10);
+      const dropPct = (c1 - c0) / 100;
+      if (d1 <= -1000) {
+        await alert(state, name + ':blowup-' + dayKey, '🔴 已爆:單日虧損超過 10%',
+          `${name}:今天已實現 ${(d1 / 100).toFixed(1)}%。這是離場點,不是攤平點。`, 48);
+      } else if (d1 >= 0 && dropPct <= -R.divergenceDropPct) {
+        await alert(state, name + ':divergence-' + dayKey, '🟡 黃燈:浮虧扛單背離',
+          `${name}:已實現當日 +${(d1 / 100).toFixed(1)}% 但權益掉 ${dropPct.toFixed(1)}% = 檯面下在扛浮虧。建議 48 小時內減倉或下車。`, 48);
+      }
+    }
+  } catch (e) { log({ trendError: e.message, provider: name }); }
+
+  return { open: openList.length, lastClose: hist[0]?.closeTime || null };
+}
+
 (async () => {
   if (process.env.TEST_ALERT === '1') {
     await notifyPhone('✅ 測試通知', '這則來自 GitHub Actions runner。看到它 = 雲端推播路徑正常,Mac 關機也收得到警報。', 'default');
@@ -107,10 +158,10 @@ async function getGold() {
   } catch (e) {
     state.failCount = (state.failCount || 0) + 1;
     log({ fetchError: e.message, failCount: state.failCount });
-    if (state.failCount >= R.failAlertAfter) {
+    if (state.failCount >= CFG.rules.failAlertAfter) {
       await alert(state, 'blind', '⚠️ 雲端監控失明',
         `GitHub Actions 連續 ${state.failCount} 次抓不到 Bybit 資料(可能被 Akamai 擋雲端 IP)。本機監控不受影響。`,
-        R.failCooldownHours);
+        CFG.rules.failCooldownHours);
     }
     saveState(state);
     process.exit(0);
@@ -119,60 +170,17 @@ async function getGold() {
   let gold = null;
   try { gold = await getGold(); } catch (e) { log({ goldError: e.message }); }
 
-  const openList = bybit.open.result.openPositionList || [];
-  const hist = bybit.hist.result.historyPositionList || [];
-
-  if (openList.length) {
-    const byDir = {};
-    for (const p of openList) (byDir[p.side] = byDir[p.side] || []).push(p);
-    for (const [side, ps] of Object.entries(byDir)) {
-      const oldestMs = Math.min(...ps.map((p) => Date.parse(p.openTime.replace(' ', 'T') + 'Z')));
-      const ageMin = Math.round((nowMs() - oldestMs) / 60000);
-      const entries = ps.map((p) => +p.entryPrice);
-      const avgEntry = entries.reduce((a, b) => a + b, 0) / entries.length;
-      let floatTxt = '';
-      if (gold) {
-        const perOz = (side === 'Buy' ? 1 : -1) * (gold.last - GC_SPOT_OFFSET - avgEntry);
-        floatTxt = `,估計浮動 ${perOz >= 0 ? '+' : ''}${perOz.toFixed(0)}$/oz(約略)`;
-      }
-      if (ps.length >= R.stackMinPositions && ageMin >= R.stackMinOldestAgeMin) {
-        await alert(state, 'stack-' + side, '🔴 紅燈:他在堆疊扛單',
-          `${PROVIDER_NAME}:${ps.length} 筆同向 ${side} 堆疊中,最老倉齡 ${ageMin} 分鐘,均價 ${avgEntry.toFixed(1)}${floatTxt}。這是 8/5 爆倉前的型態,考慮撤退。`);
-      }
-    }
+  const summary = {};
+  for (const p of CFG.providers) {
+    const data = bybit.providers[p.name];
+    if (!data) { log({ missingProvider: p.name }); continue; }
+    const R = { ...CFG.rules, ...(p.rules || {}) };
+    summary[p.name] = await checkProvider(state, p.name, data, R, gold);
   }
-
-  if (gold && !gold.stale && Math.abs(gold.movePct) >= R.goldTrendPct && hist.length) {
-    const silentMin = Math.round((nowMs() - Date.parse(hist[0].closeTime.replace(' ', 'T') + 'Z')) / 60000);
-    if (silentMin >= R.silentMinutes) {
-      await alert(state, 'silent-trend', '🔴 紅燈:單邊行情+他消失了',
-        `黃金今天 ${gold.movePct >= 0 ? '+' : ''}${gold.movePct.toFixed(1)}%(GC=F ${gold.last.toFixed(0)}),而他已 ${Math.floor(silentMin / 60)} 小時 ${silentMin % 60} 分沒有平倉紀錄 = 大概率在扛浮虧。`);
-    }
-  }
-
-  try {
-    const lines = {};
-    for (const l of bybit.trend.result.metricList) lines[l.line] = l.metricLineValue;
-    const cum = lines.cumRoe, daily = lines.dailyRoe;
-    if (cum && cum.length >= 2 && daily) {
-      const c1 = +cum[cum.length - 1].value, c0 = +cum[cum.length - 2].value;
-      const d1 = +daily[daily.length - 1].value;
-      const dayKey = new Date(+daily[daily.length - 1].statisticDateE3).toISOString().slice(0, 10);
-      const dropPct = (c1 - c0) / 100;
-      if (d1 <= -1000) {
-        await alert(state, 'blowup-' + dayKey, '🔴 已爆:單日虧損超過 10%',
-          `他今天已實現 ${(d1 / 100).toFixed(1)}%。這是離場點,不是攤平點。`, 48);
-      } else if (d1 >= 0 && dropPct <= -R.divergenceDropPct) {
-        await alert(state, 'divergence-' + dayKey, '🟡 黃燈:浮虧扛單背離',
-          `已實現當日 +${(d1 / 100).toFixed(1)}% 但權益掉 ${dropPct.toFixed(1)}% = 檯面下在扛浮虧。建議 48 小時內減倉或下車。`, 48);
-      }
-    }
-  } catch (e) { log({ trendError: e.message }); }
 
   log({
     ok: true,
-    open: openList.length,
-    lastClose: hist[0]?.closeTime || null,
+    providers: summary,
     gold: gold ? { last: gold.last, movePct: +gold.movePct.toFixed(2), stale: gold.stale } : null,
   });
   saveState(state);

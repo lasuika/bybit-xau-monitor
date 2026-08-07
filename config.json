@@ -1,0 +1,29 @@
+{
+  "providers": [
+    {
+      "mark": "m7Fvf7pQjGK4D+ycPy2SWQ==",
+      "name": "XAUUSDx SECURE TRADER"
+    },
+    {
+      "mark": "hJDxtacT0TNImJB1/LS20g==",
+      "name": "SyriaTraders",
+      "rules": {
+        "stackMinPositions": 2,
+        "stackMinOldestAgeMin": 75,
+        "silentMinutes": 240
+      }
+    }
+  ],
+  "rules": {
+    "stackMinPositions": 3,
+    "stackMinOldestAgeMin": 30,
+    "goldTrendPct": 1.5,
+    "silentMinutes": 120,
+    "divergenceDropPct": 2.0,
+    "floatLossPctOfEquity": 10,
+    "cooldownHours": 2,
+    "failAlertAfter": 3,
+    "failCooldownHours": 6
+  },
+  "gcSpotOffset": 75
+}
