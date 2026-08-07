@@ -93,6 +93,12 @@ async function getGold() {
 }
 
 (async () => {
+  if (process.env.TEST_ALERT === '1') {
+    await notifyPhone('✅ 測試通知', '這則來自 GitHub Actions runner。看到它 = 雲端推播路徑正常,Mac 關機也收得到警報。', 'default');
+    log({ testAlert: 'sent' });
+    process.exit(0);
+  }
+
   const state = loadState();
   let bybit;
   try {
