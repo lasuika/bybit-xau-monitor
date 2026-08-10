@@ -5,6 +5,7 @@ const { execFile } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const https = require('https');
+const news = require('./news.js');
 
 const DIR = __dirname;
 const CFG = JSON.parse(fs.readFileSync(path.join(DIR, 'config.json'), 'utf8'));
@@ -105,6 +106,25 @@ function trackPositionAges(state, name, openList, prevRunMs) {
   for (const key of Object.keys(seen)) {
     if (key.startsWith(name + '|') && !live.has(key)) delete seen[key];
   }
+}
+
+// A sharp move against his open direction is how unscheduled news actually
+// reaches us: the price reacts before any headline is readable.
+async function checkAdverseSpike(state, name, openList, spike, R) {
+  if (!spike || !openList.length) return;
+  const net = news.netDirection(openList);
+  if (!net) return;
+  const adverse = net > 0 ? -spike.moveUsd : spike.moveUsd;
+  if (adverse < R.spikeUsd) return;
+
+  const dir = net > 0 ? '\u505a\u591a' : '\u505a\u7a7a';
+  const float = openList.reduce((a, p) => a + (+p.profitE8 || 0) / 1e8, 0);
+  const heads = await news.topHeadlines(2);
+  const headTxt = heads.length ? `\n\u53ef\u80fd\u76f8\u95dc\uff1a${heads.join(' / ')}` : '';
+  await alert(state, name + ':spike', '\ud83d\udd34 \u7d05\u71c8\uff1a\u6025\u5674\u65b9\u5411\u8207\u4ed6\u76f8\u53cd',
+    `${name} \u76ee\u524d${dir}\uff08${openList.length} \u7b46\uff09\uff0c\u4f46\u9ec3\u91d1 ${spike.windowMin} \u5206\u9418\u5167${spike.moveUsd > 0 ? '\u6025\u6f32' : '\u6025\u8dcc'} $${Math.abs(spike.moveUsd).toFixed(1)}/oz \u5230 ${spike.last.toFixed(0)}\uff0c\u9006\u8457\u4ed6\u7684\u90e8\u4f4d\u3002` +
+    `\u76ee\u524d\u6d6e\u52d5 ${float >= 0 ? '+' : ''}${float.toFixed(0)} USD\u3002\u7121\u505c\u640d\u4e0b\u9019\u7a2e\u884c\u60c5\u6700\u5371\u96aa\u3002${headTxt}`,
+    (R.spikeCooldownMin || 30) / 60);
 }
 
 async function checkProvider(state, name, data, R, gold) {
@@ -208,12 +228,21 @@ async function checkProvider(state, name, data, R, gold) {
   const prevRunMs = state.lastRunMs || 0;
   state.lastRunMs = nowMs();
 
+  try {
+    const events = await news.fetchCalendar(state, CFG.rules.calendarCacheMin);
+    await news.checkCalendar(state, events, CFG.rules, alert, log);
+  } catch (e) { log({ calendarError: e.message }); }
+
   const summary = {};
   for (const p of CFG.providers) {
     const data = bybit.providers[p.name];
     if (!data) { log({ missingProvider: p.name }); continue; }
     const R = { ...CFG.rules, ...(p.rules || {}) };
-    trackPositionAges(state, p.name, data.open.result.openPositionList || [], prevRunMs);
+    const ol = data.open.result.openPositionList || [];
+    trackPositionAges(state, p.name, ol, prevRunMs);
+    news.recordPrice(state, ol, CFG.rules.spikeWindowMin || 10);
+    await checkAdverseSpike(state, p.name, ol,
+      news.getSpikeFromHistory(state, CFG.rules.spikeWindowMin || 10), R);
     summary[p.name] = await checkProvider(state, p.name, data, R, gold);
   }
 

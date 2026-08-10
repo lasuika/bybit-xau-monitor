@@ -24,7 +24,17 @@
     "failAlertAfter": 3,
     "failCooldownHours": 6,
     "floatWarnPct": 10,
-    "floatCritPct": 20
+    "floatCritPct": 20,
+    "spikeWindowMin": 10,
+    "spikeUsd": 9,
+    "spikeCooldownMin": 30,
+    "calendarImpact": [
+      "High"
+    ],
+    "calendarCountries": [
+      "USD"
+    ],
+    "calendarCacheMin": 360
   },
   "gcSpotOffset": 75
 }
