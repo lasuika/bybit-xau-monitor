@@ -12,6 +12,17 @@
         "stackMinOldestAgeMin": 75,
         "silentMinutes": 240
       }
+    },
+    {
+      "mark": "gazooRrbZWIufUksuaREjA==",
+      "name": "D.GOLD - N",
+      "rules": {
+        "stackMinPositions": 2,
+        "stackMinOldestAgeMin": 45,
+        "floatWarnPct": 8,
+        "floatCritPct": 15,
+        "silentMinutes": 240
+      }
     }
   ],
   "rules": {
