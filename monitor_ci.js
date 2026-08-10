@@ -89,9 +89,14 @@ function trackPositionAges(state, name, openList, prevRunMs) {
   const seen = state.seenPositions;
   const continuous = prevRunMs && nowMs() - prevRunMs < 20 * 60 * 1000;
   const live = new Set();
+  const dup = {};
 
   for (const p of openList) {
-    const key = [name, p.symbol, p.side, p.entryPrice, p.positionValueE8].join('|');
+    // positionValueE8 is size x current market price, so it moves every tick and
+    // must stay out of the identity key. entryPrice is fixed for a position;
+    // a counter disambiguates two positions opened at the same price.
+    const base = [name, p.symbol, p.side, p.entryPrice].join('|');
+    const key = base + '#' + (dup[base] = (dup[base] || 0) + 1);
     live.add(key);
     if (!seen[key]) seen[key] = { firstSeen: nowMs(), exact: !!continuous };
     p._ageMin = Math.round((nowMs() - seen[key].firstSeen) / 60000);
