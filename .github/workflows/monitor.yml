@@ -9,6 +9,10 @@ on:
         description: 'Send a test phone notification only'
         type: boolean
         default: false
+      probe_mark:
+        description: 'providerMark to probe (skips monitoring)'
+        type: string
+        default: ''
 
 permissions:
   contents: read
@@ -39,7 +43,14 @@ jobs:
           restore-keys: |
             state-
 
+      - name: Probe provider
+        if: inputs.probe_mark != ''
+        env:
+          PROVIDER_MARK: ${{ inputs.probe_mark }}
+        run: node probe.js
+
       - name: Run monitor
+        if: inputs.probe_mark == ''
         env:
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
           TEST_ALERT: ${{ inputs.test == true && '1' || '' }}
