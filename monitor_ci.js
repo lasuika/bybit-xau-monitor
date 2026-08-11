@@ -127,6 +127,56 @@ async function checkAdverseSpike(state, name, openList, spike, R) {
     (R.spikeCooldownMin || 30) / 60);
 }
 
+// Crypto (Copy Trading Classic) exposes a different shape, and the strongest
+// leaders hide their positions — so the float/stack rules cannot apply. What is
+// left is the daily curve and the visible-position case when it exists.
+async function checkCryptoProvider(state, name, data, R) {
+  const i = data.info.result || {};
+  const pr = data.pos.result || {};
+  const hidden = pr.openTradeInfoProtection === 1;
+  const pos = Array.isArray(pr.data) ? pr.data : [];
+
+  const d7 = +(i.last7DaysYieldRateE4 || 0) / 100;
+  const d7fy = +(i.last7DaysFollowerYieldE8 || 0) / 1e8;
+
+  if (d7 <= -R.crypto7dDropPct) {
+    await alert(state, name + ':crypto-7d', '🔴 紅燈:近 7 日大幅下跌',
+      `${name}:近 7 日報酬 ${d7.toFixed(1)}%,跟單者 7 日合計 ${d7fy >= 0 ? '+' : ''}${d7fy.toFixed(0)} USD。` +
+      `${hidden ? '(他隱藏持倉,只能看日線)' : ''}`, 12);
+  }
+
+  try {
+    const lines = {};
+    for (const l of (data.trend.result?.metricList || [])) lines[l.line] = l.metricLineValue;
+    const daily = lines.yieldRate || [];
+    if (daily.length) {
+      const last = daily[daily.length - 1];
+      const v = +last.value / 100;
+      const dayMs = +last.statisticDateE3;
+      const dayKey = new Date(dayMs).toISOString().slice(0, 10);
+      if (nowMs() - dayMs <= 48 * 3600 * 1000 && v <= -R.cryptoBlowupPct) {
+        await alert(state, name + ':crypto-blowup-' + dayKey, '🔴 已爆:單日大幅虧損',
+          `${name}:今日報酬 ${v.toFixed(1)}%。這是離場點,不是攤平點。`, 48);
+      }
+    }
+  } catch (e) { log({ cryptoTrendError: e.message, provider: name }); }
+
+  // Visible positions still get the leverage/stop-loss read.
+  if (!hidden && pos.length) {
+    const levs = pos.map((p) => +p.leverageE2 / 100);
+    const noSL = pos.filter((p) => !p.stopLossPrice || parseFloat(p.stopLossPrice) <= 0).length;
+    log({ cryptoPositions: name, n: pos.length, levs, noSL });
+  }
+
+  return {
+    open: hidden ? null : pos.length,
+    hidden,
+    d7: +d7.toFixed(2),
+    followers: +i.currentFollowerCount || 0,
+    stable: parseFloat(i.stableScoreLevelFormat) || 0,
+  };
+}
+
 async function checkProvider(state, name, data, R, gold) {
   const openList = data.open.result.openPositionList || [];
   const hist = data.hist.result.historyPositionList || [];
@@ -246,6 +296,12 @@ async function checkProvider(state, name, data, R, gold) {
     const data = bybit.providers[p.name];
     if (!data) { log({ missingProvider: p.name }); continue; }
     const R = { ...CFG.rules, ...(p.rules || {}) };
+
+    if (data.product === 'crypto') {
+      summary[p.name] = await checkCryptoProvider(state, p.name, data, R);
+      continue;
+    }
+
     const ol = data.open.result.openPositionList || [];
     trackPositionAges(state, p.name, ol, prevRunMs);
     news.recordPrice(state, ol, CFG.rules.spikeWindowMin || 10);

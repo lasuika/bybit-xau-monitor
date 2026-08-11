@@ -2,7 +2,8 @@
   "providers": [
     {
       "mark": "m7Fvf7pQjGK4D+ycPy2SWQ==",
-      "name": "XAUUSDx SECURE TRADER"
+      "name": "XAUUSDx SECURE TRADER",
+      "product": "mt5"
     },
     {
       "mark": "hJDxtacT0TNImJB1/LS20g==",
@@ -11,7 +12,8 @@
         "stackMinPositions": 2,
         "stackMinOldestAgeMin": 75,
         "silentMinutes": 240
-      }
+      },
+      "product": "mt5"
     },
     {
       "mark": "gazooRrbZWIufUksuaREjA==",
@@ -22,6 +24,28 @@
         "floatWarnPct": 8,
         "floatCritPct": 15,
         "silentMinutes": 240
+      },
+      "product": "mt5"
+    },
+    {
+      "mark": "A8F7cOci+zXSGuSQjNwZrw==",
+      "name": "BONDXID",
+      "product": "mt5",
+      "rules": {
+        "stackMinPositions": 2,
+        "stackMinOldestAgeMin": 60,
+        "floatWarnPct": 6,
+        "floatCritPct": 12,
+        "silentMinutes": 240
+      }
+    },
+    {
+      "mark": "9zX0A36zOHtNFFuZfHH6BA==",
+      "name": "PLE_Capital(JL)",
+      "product": "crypto",
+      "rules": {
+        "crypto7dDropPct": 15,
+        "cryptoBlowupPct": 10
       }
     }
   ],
@@ -45,7 +69,9 @@
     "calendarCountries": [
       "USD"
     ],
-    "calendarCacheMin": 360
+    "calendarCacheMin": 360,
+    "crypto7dDropPct": 20,
+    "cryptoBlowupPct": 12
   },
   "gcSpotOffset": 75
 }
