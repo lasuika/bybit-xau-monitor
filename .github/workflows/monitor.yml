@@ -13,6 +13,10 @@ on:
         description: 'providerMark to probe (skips monitoring)'
         type: string
         default: ''
+      verify:
+        description: 'Run cross-product verification sweep'
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -24,7 +28,7 @@ concurrency:
 jobs:
   check:
     runs-on: ubuntu-latest
-    timeout-minutes: 6
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
@@ -49,8 +53,13 @@ jobs:
           PROVIDER_MARK: ${{ inputs.probe_mark }}
         run: node probe.js
 
+      - name: Cross-product verify
+        if: inputs.verify == true
+        timeout-minutes: 25
+        run: node verify.js
+
       - name: Run monitor
-        if: inputs.probe_mark == ''
+        if: inputs.probe_mark == '' && inputs.verify != true
         env:
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
           TEST_ALERT: ${{ inputs.test == true && '1' || '' }}
