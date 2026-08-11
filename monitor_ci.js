@@ -206,6 +206,14 @@ async function checkProvider(state, name, data, R, gold) {
   }
 
   const state = loadState();
+
+  // If the cloud runner is the one getting blocked, skip most runs rather than
+  // launching Chrome every cron tick against a wall.
+  if ((state.failCount || 0) >= 5 && nowMs() - (state.lastRunMs || 0) < 30 * 60 * 1000) {
+    log({ skipped: 'backoff', failCount: state.failCount });
+    process.exit(0);
+  }
+
   let bybit;
   try {
     bybit = await fetchBybit();
