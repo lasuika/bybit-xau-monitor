@@ -143,7 +143,7 @@ const SCREEN = {
   } finally {
     await browser.close();
   }
-  console.log('VERIFY_RESULT_BEGIN');
-  console.log(JSON.stringify({ screen: SCREEN, ...out }));
-  console.log('VERIFY_RESULT_END');
+  const payload = JSON.stringify({ screen: SCREEN, ...out });
+  require('fs').writeFileSync('verify-result.json', payload);
+  console.log(`VERIFY_DONE gold=${out.gold.length} crypto=${out.crypto.length} bytes=${payload.length}`);
 })();

@@ -58,6 +58,14 @@ jobs:
         timeout-minutes: 25
         run: node verify.js
 
+      - name: Upload verify result
+        if: inputs.verify == true
+        uses: actions/upload-artifact@v4
+        with:
+          name: verify-result
+          path: verify-result.json
+          retention-days: 7
+
       - name: Run monitor
         if: inputs.probe_mark == '' && inputs.verify != true
         env:
