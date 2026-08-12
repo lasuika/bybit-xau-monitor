@@ -9,7 +9,10 @@
         "stackMinOldestAgeMin": 30,
         "floatWarnPct": 5,
         "floatCritPct": 10,
-        "silentMinutes": 120
+        "silentMinutes": 120,
+        "spikeUsd": 5,
+        "spikeWindowMin": 10,
+        "spikeCooldownMin": 20
       }
     }
   ],
