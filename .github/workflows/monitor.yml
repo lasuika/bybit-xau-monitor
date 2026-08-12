@@ -76,7 +76,7 @@ jobs:
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
           TEST_ALERT: ${{ inputs.test == true && '1' || '' }}
           LOOP_MINUTES: ${{ inputs.test == true && '0' || '50' }}
-          CHECK_EVERY_SEC: '150'
+          CHECK_EVERY_SEC: '90'
         run: node monitor_ci.js
 
       - name: Save state
