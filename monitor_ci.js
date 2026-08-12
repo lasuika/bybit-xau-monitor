@@ -248,11 +248,11 @@ async function checkProvider(state, name, data, R, gold) {
   return { open: openList.length, lastClose: hist[0]?.closeTime || null };
 }
 
-(async () => {
+async function runOnce() {
   if (process.env.TEST_ALERT === '1') {
     await notifyPhone('✅ 測試通知', '這則來自 GitHub Actions runner。看到它 = 雲端推播路徑正常,Mac 關機也收得到警報。', 'default');
     log({ testAlert: 'sent' });
-    process.exit(0);
+    return;
   }
 
   const state = loadState();
@@ -261,7 +261,7 @@ async function checkProvider(state, name, data, R, gold) {
   // launching Chrome every cron tick against a wall.
   if ((state.failCount || 0) >= 5 && nowMs() - (state.lastRunMs || 0) < 30 * 60 * 1000) {
     log({ skipped: 'backoff', failCount: state.failCount });
-    process.exit(0);
+    return;
   }
 
   let bybit;
@@ -277,7 +277,7 @@ async function checkProvider(state, name, data, R, gold) {
         CFG.rules.failCooldownHours);
     }
     saveState(state);
-    process.exit(0);
+    return;
   }
 
   let gold = null;
@@ -316,4 +316,26 @@ async function checkProvider(state, name, data, R, gold) {
     gold: gold ? { last: gold.last, movePct: +gold.movePct.toFixed(2), stale: gold.stale } : null,
   });
   saveState(state);
+}
+
+// GitHub throttles scheduled workflows to roughly hourly regardless of the cron
+// expression, so a single check per invocation leaves multi-hour blind spots.
+// Each run instead loops for most of an hour, giving near-continuous coverage.
+(async () => {
+  const loopMin = +(process.env.LOOP_MINUTES || 50);
+  const everySec = +(process.env.CHECK_EVERY_SEC || 150);
+  const deadline = Date.now() + loopMin * 60 * 1000;
+  let n = 0;
+  while (true) {
+    n++;
+    try {
+      await runOnce();
+    } catch (e) {
+      log({ loopError: e.message, iteration: n });
+    }
+    if (Date.now() + everySec * 1000 >= deadline) break;
+    await new Promise((r) => setTimeout(r, everySec * 1000));
+  }
+  log({ loopDone: true, iterations: n, loopMin });
 })();
+
