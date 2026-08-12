@@ -17,6 +17,10 @@ on:
         description: 'Run cross-product verification sweep'
         type: boolean
         default: false
+      history_mark:
+        description: 'providerMark to pull full trade history for'
+        type: string
+        default: ''
 
 permissions:
   contents: read
@@ -25,7 +29,7 @@ concurrency:
   # The monitoring loop holds its slot for ~50 minutes, so one-off probes and
   # verification sweeps need their own group or they queue behind it.
   group: >-
-    ${{ (inputs.probe_mark != '' || inputs.verify == true || inputs.test == true)
+    ${{ (inputs.probe_mark != '' || inputs.verify == true || inputs.test == true || inputs.history_mark != '')
         && format('oneoff-{0}', github.run_id) || 'monitor' }}
   cancel-in-progress: false
 
@@ -70,8 +74,22 @@ jobs:
           path: verify-result.json
           retention-days: 7
 
+      - name: Pull trade history
+        if: inputs.history_mark != ''
+        env:
+          PROVIDER_MARK: ${{ inputs.history_mark }}
+        run: node history.js > history-result.json 2>history.err || (cat history.err; exit 1)
+
+      - name: Upload history
+        if: inputs.history_mark != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: history-result
+          path: history-result.json
+          retention-days: 7
+
       - name: Run monitor
-        if: inputs.probe_mark == '' && inputs.verify != true
+        if: inputs.probe_mark == '' && inputs.verify != true && inputs.history_mark == ''
         env:
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
           TEST_ALERT: ${{ inputs.test == true && '1' || '' }}
