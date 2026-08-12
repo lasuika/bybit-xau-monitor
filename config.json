@@ -47,6 +47,18 @@
         "crypto7dDropPct": 15,
         "cryptoBlowupPct": 10
       }
+    },
+    {
+      "mark": "aZJnXPjLv5yD5B1l0GXlMg==",
+      "name": "XAU STRATEGY 1.0",
+      "product": "mt5",
+      "rules": {
+        "stackMinPositions": 2,
+        "stackMinOldestAgeMin": 30,
+        "floatWarnPct": 5,
+        "floatCritPct": 10,
+        "silentMinutes": 120
+      }
     }
   ],
   "rules": {
