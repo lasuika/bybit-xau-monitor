@@ -69,18 +69,44 @@ async function alert(state, key, title, msg, cooldownH) {
   log({ alert: key, title, msg });
 }
 
-async function getGold() {
-  const j = await httpsGetJson('https://query1.finance.yahoo.com/v8/finance/chart/GC=F?interval=15m&range=1d');
-  const r = j.chart.result[0];
-  const opens = r.indicators.quote[0].open.filter((x) => x != null);
-  const last = r.meta.regularMarketPrice;
-  const lastTs = r.meta.regularMarketTime * 1000;
-  return {
-    last,
-    movePct: ((last - opens[0]) / opens[0]) * 100,
-    stale: nowMs() - lastTs > 90 * 60 * 1000,
+async function getGold(state) {
+  // Yahoo intermittently returns a partial payload (missing indicators/quote),
+  // which used to throw and blank the gold reading for that whole check.
+  // Parse defensively and fall back to the last good value.
+  const parse = (j) => {
+    const r = j?.chart?.result?.[0];
+    const q = r?.indicators?.quote?.[0];
+    const opens = Array.isArray(q?.open) ? q.open.filter((x) => x != null) : [];
+    const last = r?.meta?.regularMarketPrice;
+    const lastTs = r?.meta?.regularMarketTime;
+    if (!opens.length || typeof last !== 'number' || !lastTs) return null;
+    return {
+      last,
+      movePct: ((last - opens[0]) / opens[0]) * 100,
+      stale: nowMs() - lastTs * 1000 > 90 * 60 * 1000,
+    };
   };
+
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const g = parse(await httpsGetJson(
+        'https://query1.finance.yahoo.com/v8/finance/chart/GC=F?interval=15m&range=1d'));
+      if (g) {
+        state.lastGold = { ...g, at: nowMs() };
+        return g;
+      }
+    } catch (e) { /* retry once */ }
+    if (attempt === 0) await new Promise((r) => setTimeout(r, 1500));
+  }
+
+  // Reuse the previous reading if it is recent enough to still be meaningful.
+  const cached = state.lastGold;
+  if (cached && nowMs() - cached.at < 30 * 60 * 1000) {
+    return { ...cached, stale: true, fromCache: true };
+  }
+  return null;
 }
+
 
 // The public open-position API returns no open timestamp, so position age is
 // derived from when this monitor first observed each position. Ages are exact
@@ -281,7 +307,7 @@ async function runOnce() {
   }
 
   let gold = null;
-  try { gold = await getGold(); } catch (e) { log({ goldError: e.message }); }
+  try { gold = await getGold(state); } catch (e) { log({ goldError: e.message }); }
 
   const prevRunMs = state.lastRunMs || 0;
   state.lastRunMs = nowMs();
