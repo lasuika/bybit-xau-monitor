@@ -22,7 +22,11 @@ permissions:
   contents: read
 
 concurrency:
-  group: monitor
+  # The monitoring loop holds its slot for ~50 minutes, so one-off probes and
+  # verification sweeps need their own group or they queue behind it.
+  group: >-
+    ${{ (inputs.probe_mark != '' || inputs.verify == true || inputs.test == true)
+        && format('oneoff-{0}', github.run_id) || 'monitor' }}
   cancel-in-progress: false
 
 jobs:
