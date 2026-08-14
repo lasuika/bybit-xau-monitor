@@ -48,8 +48,10 @@ function notifyPhone(title, msg, priority) {
     const req = https.request(`${NTFY_SERVER}/${NTFY_TOPIC}`, {
       method: 'POST',
       headers: {
-        Title: Buffer.from('[雲端] ' + title).toString('base64'),
-        'X-Title-Encoding': 'base64',
+        // RFC 2047 encoded-word — the documented way to put UTF-8 in ntfy's
+        // Title header. X-Title-Encoding was a made-up header the server
+        // ignored, so titles arrived as raw base64.
+        Title: '=?UTF-8?B?' + Buffer.from('[雲端] ' + title, 'utf8').toString('base64') + '?=',
         Priority: priority || 'high',
         Tags: 'cloud,rotating_light',
       },
